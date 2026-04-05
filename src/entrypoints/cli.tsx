@@ -95,6 +95,12 @@ async function main(): Promise<void> {
 
   await validateProviderEnvOrExit()
 
+  // Print a redacted debug view of resolved provider config when CLAUDE_CODE_DEBUG=1.
+  {
+    const { printResolvedConfigDebug } = await import('../config/resolvedConfig.js')
+    printResolvedConfigDebug()
+  }
+
   // Print the gradient startup screen before the Ink UI loads
   const { printStartupScreen } = await import('../components/StartupScreen.js')
   printStartupScreen()

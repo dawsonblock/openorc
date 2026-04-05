@@ -1,7 +1,7 @@
 {
   "name": "@gitlawb/openclaude",
   "version": "0.1.7",
-  "description": "Claude Code opened to any LLM — OpenAI, Gemini, DeepSeek, Ollama, and 200+ models",
+  "description": "Claude Code opened to any LLM — OpenAI, Gemini, GitHub Models, Codex, and Ollama",
   "type": "module",
   "bin": {
     "openclaude": "./bin/openclaude"

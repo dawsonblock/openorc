@@ -15,6 +15,61 @@ function isEnvTruthy(value: string | undefined): boolean {
   return normalized !== '' && normalized !== '0' && normalized !== 'false' && normalized !== 'no'
 }
 
+/** Validate Bedrock config: at least one auth path must be resolvable. */
+function validateBedrockConfig(env: NodeJS.ProcessEnv): string | null {
+  // Bearer token is the simplest auth path
+  if (env.AWS_BEARER_TOKEN_BEDROCK?.trim()) return null
+  // Skip-auth flag is an explicit opt-out for proxy/testing setups
+  if (isEnvTruthy(env.CLAUDE_CODE_SKIP_BEDROCK_AUTH)) return null
+  // Standard AWS SDK credential chain: access key + secret
+  if (env.AWS_ACCESS_KEY_ID?.trim() && env.AWS_SECRET_ACCESS_KEY?.trim()) return null
+  // Credential file / profile / EC2 instance role cannot be checked here without
+  // making a network call; emit a warning rather than a hard failure so that
+  // users relying on IAM roles or ~/.aws/credentials can still start.
+  if (env.AWS_PROFILE?.trim() || env.AWS_SHARED_CREDENTIALS_FILE?.trim()) return null
+  // Roles via the metadata service can't be probed at startup — allow through
+  // but the runtime will fail if credentials are absent.
+  return (
+    'CLAUDE_CODE_USE_BEDROCK=1 is set but no AWS credentials were found.\n' +
+    '  Set AWS_BEARER_TOKEN_BEDROCK, or set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY,\n' +
+    '  or use an IAM role / AWS_PROFILE and ensure the credential chain is configured.\n' +
+    '  Set CLAUDE_CODE_SKIP_BEDROCK_AUTH=1 to bypass this check for proxy/testing setups.\n' +
+    '  Note: Bedrock support is EXPERIMENTAL.'
+  )
+}
+
+/** Validate Vertex config: project ID is required. */
+function validateVertexConfig(env: NodeJS.ProcessEnv): string | null {
+  if (isEnvTruthy(env.CLAUDE_CODE_SKIP_VERTEX_AUTH)) return null
+  const projectId = (
+    env.ANTHROPIC_VERTEX_PROJECT_ID ??
+    env.GCLOUD_PROJECT ??
+    env.GOOGLE_CLOUD_PROJECT
+  )?.trim()
+  if (projectId) return null
+  return (
+    'CLAUDE_CODE_USE_VERTEX=1 is set but ANTHROPIC_VERTEX_PROJECT_ID (or ' +
+    'GCLOUD_PROJECT / GOOGLE_CLOUD_PROJECT) is not set.\n' +
+    '  Set CLAUDE_CODE_SKIP_VERTEX_AUTH=1 to bypass this check for proxy setups.\n' +
+    '  Note: Vertex support is EXPERIMENTAL.'
+  )
+}
+
+/** Validate Foundry config: endpoint resource is required. */
+function validateFoundryConfig(env: NodeJS.ProcessEnv): string | null {
+  if (isEnvTruthy(env.CLAUDE_CODE_SKIP_FOUNDRY_AUTH)) return null
+  const resource = (
+    env.ANTHROPIC_FOUNDRY_RESOURCE ?? env.ANTHROPIC_FOUNDRY_BASE_URL
+  )?.trim()
+  if (resource) return null
+  return (
+    'CLAUDE_CODE_USE_FOUNDRY=1 is set but neither ANTHROPIC_FOUNDRY_RESOURCE nor ' +
+    'ANTHROPIC_FOUNDRY_BASE_URL is set.\n' +
+    '  Set CLAUDE_CODE_SKIP_FOUNDRY_AUTH=1 to bypass this check for proxy setups.\n' +
+    '  Note: Foundry support is EXPERIMENTAL.'
+  )
+}
+
 export async function getProviderValidationError(
   env: NodeJS.ProcessEnv = process.env,
   options?: {
@@ -34,6 +89,18 @@ export async function getProviderValidationError(
       return 'GEMINI_API_KEY, GOOGLE_API_KEY, GEMINI_ACCESS_TOKEN, or Google ADC credentials are required when CLAUDE_CODE_USE_GEMINI=1.'
     }
     return null
+  }
+
+  if (isEnvTruthy(env.CLAUDE_CODE_USE_BEDROCK)) {
+    return validateBedrockConfig(env)
+  }
+
+  if (isEnvTruthy(env.CLAUDE_CODE_USE_VERTEX)) {
+    return validateVertexConfig(env)
+  }
+
+  if (isEnvTruthy(env.CLAUDE_CODE_USE_FOUNDRY)) {
+    return validateFoundryConfig(env)
   }
 
   if (useGithub && !useOpenAI) {

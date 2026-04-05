@@ -2,7 +2,7 @@
 
 OpenClaude is an open-source coding-agent CLI for cloud and local model providers.
 
-Use OpenAI-compatible APIs, Gemini, GitHub Models, Codex, Ollama, Atomic Chat, and other supported backends while keeping one terminal-first workflow: prompts, tools, agents, MCP, slash commands, and streaming output.
+Use OpenAI-compatible APIs, Gemini, GitHub Models, Codex, and Ollama while keeping one terminal-first workflow: prompts, tools, agents, MCP, slash commands, and streaming output.
 
 [![PR Checks](https://github.com/Gitlawb/openclaude/actions/workflows/pr-checks.yml/badge.svg?branch=main)](https://github.com/Gitlawb/openclaude/actions/workflows/pr-checks.yml)
 [![Release](https://img.shields.io/github/v/tag/Gitlawb/openclaude?label=release&color=0ea5e9)](https://github.com/Gitlawb/openclaude/tags)
@@ -16,7 +16,7 @@ Use OpenAI-compatible APIs, Gemini, GitHub Models, Codex, Ollama, Atomic Chat, a
 
 - Use one CLI across cloud APIs and local model backends
 - Save provider profiles inside the app with `/provider`
-- Run with OpenAI-compatible services, Gemini, GitHub Models, Codex, Ollama, Atomic Chat, and other supported providers
+- Run with OpenAI-compatible services, Gemini, GitHub Models, Codex, and Ollama
 - Keep coding-agent workflows in one place: bash, file tools, grep, glob, agents, tasks, MCP, and web tools
 - Use the bundled VS Code extension for launch integration and theme support
 
@@ -100,24 +100,32 @@ Advanced and source-build guides:
 
 ## Supported Providers
 
-| Provider | Setup Path | Notes |
-| --- | --- | --- |
-| OpenAI-compatible | `/provider` or env vars | Works with OpenAI, OpenRouter, DeepSeek, Groq, Mistral, LM Studio, and other compatible `/v1` servers |
-| Gemini | `/provider` or env vars | Supports API key, access token, or local ADC workflow on current `main` |
-| GitHub Models | `/onboard-github` | Interactive onboarding with saved credentials |
-| Codex | `/provider` | Uses existing Codex credentials when available |
-| Ollama | `/provider` or env vars | Local inference with no API key |
-| Atomic Chat | advanced setup | Local Apple Silicon backend |
-| Bedrock / Vertex / Foundry | env vars | Additional provider integrations for supported environments |
+The table below reflects what is verified by automated tests.  The canonical
+provider matrix is defined in code at
+[`src/providers/supportedMatrix.ts`](src/providers/supportedMatrix.ts).
+
+| Provider | Status | Setup Path | Notes |
+| --- | --- | --- | --- |
+| OpenAI-compatible | **stable** | `/provider` or env vars | Works with OpenAI, OpenRouter, DeepSeek, Groq, Mistral, LM Studio, and other compatible `/v1` servers |
+| Gemini | **stable** | `/provider` or env vars | Supports API key, access token, or local ADC workflow |
+| GitHub Models | **stable** | `/onboard-github` | Interactive onboarding with saved credentials |
+| Codex | **stable** | `/provider` | Auto-selected when model alias is codexplan / codexspark / gpt-5.x-codex |
+| Ollama | **stable** | `/provider` or env vars | Local inference at any `OPENAI_BASE_URL` pointing to localhost / private IP |
+| Anthropic (first-party) | **stable** | account login or `ANTHROPIC_API_KEY` | Default when no provider flag is set |
+| AWS Bedrock | experimental | env vars | Startup validates credential source is present; credential validity is only confirmed at runtime |
+| Google Vertex AI | experimental | env vars | Requires `ANTHROPIC_VERTEX_PROJECT_ID`; project ID presence validated at startup, GCP credential validity at runtime |
+| Anthropic Foundry (Azure) | experimental | env vars | Requires `ANTHROPIC_FOUNDRY_RESOURCE`; resource presence validated at startup, Azure credential validity at runtime |
+
+See [EXPERIMENTAL.md](EXPERIMENTAL.md) for details on the experimental providers.
 
 ## What Works
 
 - **Tool-driven coding workflows**: Bash, file read/write/edit, grep, glob, agents, tasks, MCP, and slash commands
 - **Streaming responses**: Real-time token output and tool progress
 - **Tool calling**: Multi-step tool loops with model calls, tool execution, and follow-up responses
-- **Images**: URL and base64 image inputs for providers that support vision
+- **Images**: URL and base64 image inputs for providers that support vision (stable providers only)
 - **Provider profiles**: Guided setup plus saved `.openclaude-profile.json` support
-- **Local and remote model backends**: Cloud APIs, local servers, and Apple Silicon local inference
+- **Local and remote model backends**: Cloud APIs and local inference servers
 
 ## Provider Notes
 
@@ -127,6 +135,7 @@ OpenClaude supports multiple providers, but behavior is not identical across all
 - Tool quality depends heavily on the selected model
 - Smaller local models can struggle with long multi-step tool flows
 - Some providers impose lower output caps than the CLI defaults, and OpenClaude adapts where possible
+- Experimental providers (Bedrock, Vertex, Foundry) have no automated test coverage for auth or capability correctness
 
 For best results, use models with strong tool/function calling support.
 
