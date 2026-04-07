@@ -141,7 +141,11 @@ function buildCredentials(
     awsCredentials: awsCreds,
     vertexProjectId:
       provider === 'vertex'
-        ? credentialStatus(env.ANTHROPIC_VERTEX_PROJECT_ID)
+        ? credentialStatus(
+            env.ANTHROPIC_VERTEX_PROJECT_ID ??
+              env.GCLOUD_PROJECT ??
+              env.GOOGLE_CLOUD_PROJECT,
+          )
         : notRequired(),
     foundryResource:
       provider === 'foundry'
