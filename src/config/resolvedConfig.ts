@@ -77,14 +77,20 @@ function notRequired(): CredentialStatus {
   return 'not-required'
 }
 
+function resolveProviderRequestFromEnv(
+  env: NodeJS.ProcessEnv,
+): ResolvedProviderRequest {
+  return resolveProviderRequest({
+    model: env.OPENAI_MODEL,
+    baseUrl: env.OPENAI_BASE_URL ?? env.OPENAI_API_BASE,
+  })
+}
+
 function detectProvider(env: NodeJS.ProcessEnv): ProviderKind {
   if (isEnvTruthy(env.CLAUDE_CODE_USE_GEMINI)) return 'gemini'
   if (isEnvTruthy(env.CLAUDE_CODE_USE_GITHUB)) return 'github'
   if (isEnvTruthy(env.CLAUDE_CODE_USE_OPENAI)) {
-    const request = resolveProviderRequest({
-      model: env.OPENAI_MODEL,
-      baseUrl: env.OPENAI_BASE_URL,
-    })
+    const request = resolveProviderRequestFromEnv(env)
     return request.transport === 'codex_responses' ? 'codex' : 'openai'
   }
   if (isEnvTruthy(env.CLAUDE_CODE_USE_BEDROCK)) return 'bedrock'
