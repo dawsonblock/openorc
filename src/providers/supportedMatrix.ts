@@ -193,7 +193,7 @@ export function getProviderMatrixEntry(
  * Return true if `provider` appears in the matrix (stable or experimental).
  */
 export function isKnownProvider(provider: string): boolean {
-  return provider in PROVIDER_MATRIX
+  return Object.hasOwn(PROVIDER_MATRIX, provider)
 }
 
 /**
