@@ -152,6 +152,38 @@ describe('resolveConfig — credentials', () => {
     expect(cfg.credentials.awsCredentials).toBe('present')
   })
 
+  test('bedrock: access key alone (no secret) shows missing', () => {
+    const cfg = resolveConfig(
+      env({ CLAUDE_CODE_USE_BEDROCK: '1', AWS_ACCESS_KEY_ID: 'AKIATEST' }),
+    )
+    expect(cfg.credentials.awsCredentials).toBe('missing')
+  })
+
+  test('bedrock: access key + secret shows present', () => {
+    const cfg = resolveConfig(
+      env({ CLAUDE_CODE_USE_BEDROCK: '1', AWS_ACCESS_KEY_ID: 'AKIATEST', AWS_SECRET_ACCESS_KEY: 'sec' }),
+    )
+    expect(cfg.credentials.awsCredentials).toBe('present')
+  })
+
+  test('bedrock: ECS task role shows present', () => {
+    const cfg = resolveConfig(
+      env({ CLAUDE_CODE_USE_BEDROCK: '1', AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: '/v2/credentials/test' }),
+    )
+    expect(cfg.credentials.awsCredentials).toBe('present')
+  })
+
+  test('bedrock: EKS IRSA shows present when both token file and role ARN are set', () => {
+    const cfg = resolveConfig(
+      env({
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        AWS_WEB_IDENTITY_TOKEN_FILE: '/var/run/secrets/token',
+        AWS_ROLE_ARN: 'arn:aws:iam::123:role/r',
+      }),
+    )
+    expect(cfg.credentials.awsCredentials).toBe('present')
+  })
+
   test('foundry: resource present', () => {
     const cfg = resolveConfig(
       env({ CLAUDE_CODE_USE_FOUNDRY: '1', ANTHROPIC_FOUNDRY_RESOURCE: 'my-resource' }),
@@ -230,5 +262,30 @@ describe('formatResolvedConfigDebug — secret redaction', () => {
     // value should not bleed through as plain text
     expect(output).not.toMatch(/sk-|ghp_|key123/)
     expect(output).toContain('[REDACTED]')
+  })
+
+  test('URL with embedded password is sanitized in debug output', () => {
+    const cfg: ResolvedConfig = {
+      ...baseConfig,
+      baseUrl: 'https://user:super-secret-pass@proxy.example.com/v1',
+    }
+    const output = formatResolvedConfigDebug(cfg)
+    expect(output).not.toContain('super-secret-pass')
+    expect(output).toContain('proxy.example.com')
+  })
+
+  test('URL with query-string API key is sanitized in debug output', () => {
+    const cfg: ResolvedConfig = {
+      ...baseConfig,
+      baseUrl: 'https://proxy.example.com/v1?api_key=my-secret-token',
+    }
+    const output = formatResolvedConfigDebug(cfg)
+    expect(output).not.toContain('my-secret-token')
+    expect(output).toContain('proxy.example.com')
+  })
+
+  test('plain URL without credentials is preserved in debug output', () => {
+    const output = formatResolvedConfigDebug(baseConfig)
+    expect(output).toContain('api.openai.com')
   })
 })

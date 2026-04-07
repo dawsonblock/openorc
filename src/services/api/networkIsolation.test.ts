@@ -203,6 +203,49 @@ describe('validation: Bedrock startup checks', () => {
     expect(error).toBeNull()
   })
 
+  test('Bedrock with access key alone (no secret) still fails', async () => {
+    const error = await getProviderValidationError({
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      AWS_ACCESS_KEY_ID: 'AKIATEST',
+    } as NodeJS.ProcessEnv)
+    expect(error).not.toBeNull()
+    expect(error).toMatch(/AWS/)
+  })
+
+  test('Bedrock with AWS_PROFILE passes (credential file auth)', async () => {
+    const error = await getProviderValidationError({
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      AWS_PROFILE: 'my-profile',
+    } as NodeJS.ProcessEnv)
+    expect(error).toBeNull()
+  })
+
+  test('Bedrock with ECS container credentials passes', async () => {
+    const error = await getProviderValidationError({
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: '/v2/credentials/test-id',
+    } as NodeJS.ProcessEnv)
+    expect(error).toBeNull()
+  })
+
+  test('Bedrock with EKS IRSA credentials passes', async () => {
+    const error = await getProviderValidationError({
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      AWS_WEB_IDENTITY_TOKEN_FILE: '/var/run/secrets/token',
+      AWS_ROLE_ARN: 'arn:aws:iam::123456789012:role/my-role',
+    } as NodeJS.ProcessEnv)
+    expect(error).toBeNull()
+  })
+
+  test('Bedrock with EKS token file alone (no role ARN) still fails', async () => {
+    const error = await getProviderValidationError({
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      AWS_WEB_IDENTITY_TOKEN_FILE: '/var/run/secrets/token',
+    } as NodeJS.ProcessEnv)
+    expect(error).not.toBeNull()
+    expect(error).toMatch(/AWS/)
+  })
+
   test('Bedrock with skip-auth flag passes regardless of credentials', async () => {
     const error = await getProviderValidationError({
       CLAUDE_CODE_USE_BEDROCK: '1',
@@ -269,5 +312,60 @@ describe('validation: Foundry startup checks', () => {
       CLAUDE_CODE_SKIP_FOUNDRY_AUTH: '1',
     } as NodeJS.ProcessEnv)
     expect(error).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Validation precedence: mirrors getAPIProvider() priority order
+// ---------------------------------------------------------------------------
+
+describe('validation: precedence matches provider selection', () => {
+  test('GitHub flag takes priority over OpenAI: validates GitHub token, not OPENAI_API_KEY', async () => {
+    // getAPIProvider() would select 'github' when both flags are set.
+    // Validation should check the GitHub token, not OPENAI_API_KEY.
+    const error = await getProviderValidationError({
+      CLAUDE_CODE_USE_GITHUB: '1',
+      CLAUDE_CODE_USE_OPENAI: '1',
+      OPENAI_API_KEY: 'sk-test',
+      // intentionally no GITHUB_TOKEN
+    } as NodeJS.ProcessEnv)
+    expect(error).not.toBeNull()
+    expect(error).toMatch(/GITHUB_TOKEN/)
+  })
+
+  test('GitHub + OpenAI with token passes (GitHub wins)', async () => {
+    const error = await getProviderValidationError({
+      CLAUDE_CODE_USE_GITHUB: '1',
+      CLAUDE_CODE_USE_OPENAI: '1',
+      GITHUB_TOKEN: 'ghp_test',
+    } as NodeJS.ProcessEnv)
+    expect(error).toBeNull()
+  })
+
+  test('OpenAI flag takes priority over Bedrock: validates OPENAI_API_KEY, not AWS creds', async () => {
+    // getAPIProvider() would select 'openai' when USE_OPENAI is set (regardless of USE_BEDROCK).
+    const error = await getProviderValidationError({
+      CLAUDE_CODE_USE_OPENAI: '1',
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      // no OPENAI_API_KEY (non-local URL defaults to api.openai.com)
+    } as NodeJS.ProcessEnv)
+    expect(error).not.toBeNull()
+    expect(error).toMatch(/OPENAI_API_KEY/)
+  })
+
+  test('Gemini flag takes priority over everything else', async () => {
+    const error = await getProviderValidationError(
+      {
+        CLAUDE_CODE_USE_GEMINI: '1',
+        CLAUDE_CODE_USE_OPENAI: '1',
+        CLAUDE_CODE_USE_GITHUB: '1',
+        OPENAI_API_KEY: 'sk-test',
+        GITHUB_TOKEN: 'ghp_test',
+        // no Gemini credentials
+      } as NodeJS.ProcessEnv,
+      { resolveGeminiCredential: async () => ({ kind: 'none' }) },
+    )
+    expect(error).not.toBeNull()
+    expect(error).toMatch(/GEMINI_API_KEY/)
   })
 })

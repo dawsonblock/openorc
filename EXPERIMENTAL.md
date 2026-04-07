@@ -18,10 +18,15 @@ reliability expectations as the stable surface.
 - `usageReporting` and `webSearch` are not wired for Bedrock responses.
 - There are no automated tests for the Bedrock code path end-to-end.
 
-**Required config:**
-- One of: `AWS_BEARER_TOKEN_BEDROCK`, `AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY`,
-  `AWS_PROFILE`, or an IAM role attached to the host.
-- `AWS_REGION` or `AWS_DEFAULT_REGION` (defaults to `us-east-1`).
+**Required config (startup check passes with any of the following):**
+- `AWS_BEARER_TOKEN_BEDROCK` — short-term bearer token
+- `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` — long-term credentials
+- `AWS_PROFILE` / `AWS_SHARED_CREDENTIALS_FILE` — credential file / named profile
+- `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` / `AWS_CONTAINER_CREDENTIALS_FULL_URI` — ECS task role
+- `AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN` — EKS / IRSA
+
+> **EC2 instance profiles:** EC2 instance profiles and other metadata-service-only auth cannot be
+> probed at startup without a network call.  Set `CLAUDE_CODE_SKIP_BEDROCK_AUTH=1` in those environments.
 
 **Bypass startup check:**
 ```

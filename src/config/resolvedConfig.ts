@@ -99,6 +99,23 @@ function detectProvider(env: NodeJS.ProcessEnv): ProviderKind {
   return 'firstParty'
 }
 
+/**
+ * Return the CredentialStatus for AWS Bedrock credentials.
+ * Mirrors the logic in validateBedrockConfig() so the debug view is consistent
+ * with what startup validation checks.
+ */
+function bedrockCredentialStatus(env: NodeJS.ProcessEnv): CredentialStatus {
+  if (env.AWS_BEARER_TOKEN_BEDROCK?.trim()) return 'present'
+  if (env.AWS_ACCESS_KEY_ID?.trim() && env.AWS_SECRET_ACCESS_KEY?.trim()) return 'present'
+  if (env.AWS_PROFILE?.trim() || env.AWS_SHARED_CREDENTIALS_FILE?.trim()) return 'present'
+  if (
+    env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI?.trim() ||
+    env.AWS_CONTAINER_CREDENTIALS_FULL_URI?.trim()
+  ) return 'present'
+  if (env.AWS_WEB_IDENTITY_TOKEN_FILE?.trim() && env.AWS_ROLE_ARN?.trim()) return 'present'
+  return 'missing'
+}
+
 function buildCredentials(
   provider: ProviderKind,
   env: NodeJS.ProcessEnv,
@@ -106,14 +123,6 @@ function buildCredentials(
   const codexCreds = (provider === 'codex')
     ? resolveCodexApiCredentials(env)
     : null
-
-  const awsCreds: CredentialStatus =
-    provider === 'bedrock'
-      ? credentialStatus(
-          env.AWS_BEARER_TOKEN_BEDROCK ??
-            env.AWS_ACCESS_KEY_ID,
-        )
-      : notRequired()
 
   return {
     anthropicApiKey:
@@ -138,7 +147,10 @@ function buildCredentials(
       provider === 'github'
         ? credentialStatus(env.GITHUB_TOKEN ?? env.GH_TOKEN)
         : notRequired(),
-    awsCredentials: awsCreds,
+    awsCredentials:
+      provider === 'bedrock'
+        ? bedrockCredentialStatus(env)
+        : notRequired(),
     vertexProjectId:
       provider === 'vertex'
         ? credentialStatus(
@@ -168,10 +180,7 @@ export function resolveConfig(env: NodeJS.ProcessEnv = process.env): ResolvedCon
   const provider = detectProvider(env)
 
   const request = (provider === 'openai' || provider === 'codex' || provider === 'github')
-    ? resolveProviderRequest({
-        model: env.OPENAI_MODEL,
-        baseUrl: env.OPENAI_BASE_URL,
-      })
+    ? resolveProviderRequestFromEnv(env)
     : {
         transport: 'chat_completions' as const,
         requestedModel: env.OPENAI_MODEL ?? env.GEMINI_MODEL ?? env.ANTHROPIC_MODEL ?? '',
@@ -213,6 +222,23 @@ function redactCredential(key: string, status: CredentialStatus): string {
 }
 
 /**
+ * Strip userinfo (username:password) and query string from a URL so it is safe
+ * to include in debug output.  Returns the URL unchanged if it cannot be parsed.
+ */
+function sanitizeUrlForDisplay(url: string): string {
+  if (!url) return url
+  try {
+    const parsed = new URL(url)
+    parsed.username = ''
+    parsed.password = ''
+    parsed.search = ''
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
+/**
  * Build a human-readable, secret-free representation of the resolved config.
  * Safe to print to stderr or log files.
  */
@@ -228,7 +254,7 @@ export function formatResolvedConfigDebug(config: ResolvedConfig): string {
     `  transport:       ${config.transport}`,
     `  requestedModel:  ${config.requestedModel || '(none)'}`,
     `  resolvedModel:   ${config.resolvedModel || '(none)'}`,
-    `  baseUrl:         ${config.baseUrl || '(default)'}`,
+    `  baseUrl:         ${sanitizeUrlForDisplay(config.baseUrl) || '(default)'}`,
     ...(config.reasoningEffort
       ? [`  reasoningEffort: ${config.reasoningEffort}`]
       : []),

@@ -21,19 +21,27 @@ function validateBedrockConfig(env: NodeJS.ProcessEnv): string | null {
   if (env.AWS_BEARER_TOKEN_BEDROCK?.trim()) return null
   // Skip-auth flag is an explicit opt-out for proxy/testing setups
   if (isEnvTruthy(env.CLAUDE_CODE_SKIP_BEDROCK_AUTH)) return null
-  // Standard AWS SDK credential chain: access key + secret
+  // Standard AWS SDK credential chain: access key + secret (both required)
   if (env.AWS_ACCESS_KEY_ID?.trim() && env.AWS_SECRET_ACCESS_KEY?.trim()) return null
-  // Credential file / profile / EC2 instance role cannot be checked here without
-  // making a network call; emit a warning rather than a hard failure so that
-  // users relying on IAM roles or ~/.aws/credentials can still start.
+  // Credential file / profile
   if (env.AWS_PROFILE?.trim() || env.AWS_SHARED_CREDENTIALS_FILE?.trim()) return null
-  // Roles via the metadata service can't be probed at startup — allow through
-  // but the runtime will fail if credentials are absent.
+  // ECS task role (container credentials)
+  if (
+    env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI?.trim() ||
+    env.AWS_CONTAINER_CREDENTIALS_FULL_URI?.trim()
+  ) return null
+  // EKS / IRSA (web identity token)
+  if (env.AWS_WEB_IDENTITY_TOKEN_FILE?.trim() && env.AWS_ROLE_ARN?.trim()) return null
+  // EC2 instance roles and other metadata-service-based auth cannot be verified at
+  // startup without making a network call. Use CLAUDE_CODE_SKIP_BEDROCK_AUTH=1 to
+  // bypass this check when running on EC2 with an instance profile.
   return (
     'CLAUDE_CODE_USE_BEDROCK=1 is set but no AWS credentials were found.\n' +
     '  Set AWS_BEARER_TOKEN_BEDROCK, or set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY,\n' +
-    '  or use an IAM role / AWS_PROFILE and ensure the credential chain is configured.\n' +
-    '  Set CLAUDE_CODE_SKIP_BEDROCK_AUTH=1 to bypass this check for proxy/testing setups.\n' +
+    '  or use AWS_PROFILE / AWS_SHARED_CREDENTIALS_FILE for credential-file auth,\n' +
+    '  or set AWS_CONTAINER_CREDENTIALS_RELATIVE_URI / AWS_WEB_IDENTITY_TOKEN_FILE for ECS/EKS roles.\n' +
+    '  If using an EC2 instance profile or another metadata-service auth source,\n' +
+    '  set CLAUDE_CODE_SKIP_BEDROCK_AUTH=1 to bypass this startup check.\n' +
     '  Note: Bedrock support is EXPERIMENTAL.'
   )
 }
@@ -78,9 +86,11 @@ export async function getProviderValidationError(
     ) => Promise<GeminiResolvedCredential>
   },
 ): Promise<string | null> {
-  const useOpenAI = isEnvTruthy(env.CLAUDE_CODE_USE_OPENAI)
-  const useGithub = isEnvTruthy(env.CLAUDE_CODE_USE_GITHUB)
+  // Validation follows the same priority order as getAPIProvider() in
+  // src/utils/model/providers.ts so we validate only the provider that
+  // will actually be selected at runtime.
 
+  // 1. Gemini takes top priority
   if (isEnvTruthy(env.CLAUDE_CODE_USE_GEMINI)) {
     const geminiCredential = await (
       options?.resolveGeminiCredential ?? resolveGeminiCredential
@@ -91,19 +101,8 @@ export async function getProviderValidationError(
     return null
   }
 
-  if (isEnvTruthy(env.CLAUDE_CODE_USE_BEDROCK)) {
-    return validateBedrockConfig(env)
-  }
-
-  if (isEnvTruthy(env.CLAUDE_CODE_USE_VERTEX)) {
-    return validateVertexConfig(env)
-  }
-
-  if (isEnvTruthy(env.CLAUDE_CODE_USE_FOUNDRY)) {
-    return validateFoundryConfig(env)
-  }
-
-  if (useGithub && !useOpenAI) {
+  // 2. GitHub Models — takes priority over CLAUDE_CODE_USE_OPENAI when both are set
+  if (isEnvTruthy(env.CLAUDE_CODE_USE_GITHUB)) {
     const token = (env.GITHUB_TOKEN?.trim() || env.GH_TOKEN?.trim()) ?? ''
     if (!token) {
       return 'GITHUB_TOKEN or GH_TOKEN is required when CLAUDE_CODE_USE_GITHUB=1.'
@@ -111,44 +110,57 @@ export async function getProviderValidationError(
     return null
   }
 
-  if (!useOpenAI) {
-    return null
-  }
+  // 3. OpenAI-compatible (including Codex model aliases)
+  if (isEnvTruthy(env.CLAUDE_CODE_USE_OPENAI)) {
+    const request = resolveProviderRequest({
+      model: env.OPENAI_MODEL,
+      baseUrl: env.OPENAI_BASE_URL,
+    })
 
-  const request = resolveProviderRequest({
-    model: env.OPENAI_MODEL,
-    baseUrl: env.OPENAI_BASE_URL,
-  })
-
-  if (env.OPENAI_API_KEY === 'SUA_CHAVE') {
-    return 'Invalid OPENAI_API_KEY: placeholder value SUA_CHAVE detected. Set a real key or unset for local providers.'
-  }
-
-  if (request.transport === 'codex_responses') {
-    const credentials = resolveCodexApiCredentials(env)
-    if (!credentials.apiKey) {
-      const authHint = credentials.authPath
-        ? ` or put auth.json at ${credentials.authPath}`
-        : ''
-      const safeModel =
-        redactSecretValueForDisplay(request.requestedModel, env) ??
-        'the requested model'
-      return `Codex auth is required for ${safeModel}. Set CODEX_API_KEY${authHint}.`
+    if (env.OPENAI_API_KEY === 'SUA_CHAVE') {
+      return 'Invalid OPENAI_API_KEY: placeholder value SUA_CHAVE detected. Set a real key or unset for local providers.'
     }
-    if (!credentials.accountId) {
-      return 'Codex auth is missing chatgpt_account_id. Re-login with Codex or set CHATGPT_ACCOUNT_ID/CODEX_ACCOUNT_ID.'
-    }
-    return null
-  }
 
-  if (!env.OPENAI_API_KEY && !isLocalProviderUrl(request.baseUrl)) {
-    const hasGithubToken = !!(env.GITHUB_TOKEN?.trim() || env.GH_TOKEN?.trim())
-    if (useGithub && hasGithubToken) {
+    if (request.transport === 'codex_responses') {
+      const credentials = resolveCodexApiCredentials(env)
+      if (!credentials.apiKey) {
+        const authHint = credentials.authPath
+          ? ` or put auth.json at ${credentials.authPath}`
+          : ''
+        const safeModel =
+          redactSecretValueForDisplay(request.requestedModel, env) ??
+          'the requested model'
+        return `Codex auth is required for ${safeModel}. Set CODEX_API_KEY${authHint}.`
+      }
+      if (!credentials.accountId) {
+        return 'Codex auth is missing chatgpt_account_id. Re-login with Codex or set CHATGPT_ACCOUNT_ID/CODEX_ACCOUNT_ID.'
+      }
       return null
     }
-    return 'OPENAI_API_KEY is required when CLAUDE_CODE_USE_OPENAI=1 and OPENAI_BASE_URL is not local.'
+
+    if (!env.OPENAI_API_KEY && !isLocalProviderUrl(request.baseUrl)) {
+      return 'OPENAI_API_KEY is required when CLAUDE_CODE_USE_OPENAI=1 and OPENAI_BASE_URL is not local.'
+    }
+
+    return null
   }
 
+  // 4. AWS Bedrock
+  if (isEnvTruthy(env.CLAUDE_CODE_USE_BEDROCK)) {
+    return validateBedrockConfig(env)
+  }
+
+  // 5. Google Vertex AI
+  if (isEnvTruthy(env.CLAUDE_CODE_USE_VERTEX)) {
+    return validateVertexConfig(env)
+  }
+
+  // 6. Anthropic Foundry (Azure)
+  if (isEnvTruthy(env.CLAUDE_CODE_USE_FOUNDRY)) {
+    return validateFoundryConfig(env)
+  }
+
+  // 7. First-party Anthropic — auth is validated at runtime by the SDK
   return null
 }
 
