@@ -96,7 +96,7 @@ async function main(): Promise<void> {
   await validateProviderEnvOrExit()
 
   // Print a redacted debug view of resolved provider config when CLAUDE_CODE_DEBUG=1.
-  {
+  if (process.env.CLAUDE_CODE_DEBUG === '1') {
     const { printResolvedConfigDebug } = await import('../config/resolvedConfig.js')
     printResolvedConfigDebug()
   }
